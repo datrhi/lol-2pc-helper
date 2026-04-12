@@ -45,7 +45,7 @@ def require_auth(f):
 @require_auth
 def api_status():
     """Return current League process state."""
-    status = lol.get_status()
+    status = lol.get_status(config)
     log.info("Status requested: %s", status)
     return jsonify({"ok": True, **status})
 

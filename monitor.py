@@ -105,14 +105,44 @@ def run_restart_workflow(config: dict) -> bool:
     time.sleep(3)
 
     # ── Step 2: Locally relaunch League Client ───────────────
+    # Relaunch and keep retrying until LOGGED_IN_ELSEWHERE is detected.
+    # That error confirms Machine 1's account session is still holding
+    # the slot, which means it's safe for Machine 1 to relaunch next.
     print(f"  {B}[Step 2/3]{RST} Relaunching League Client locally (Machine 2)...")
-    result = lol.relaunch_league_client(config)
-    if result.get("ok"):
-        print(f"  {G}✓{RST} Machine 2: League Client is ready (phase={result.get('phase')})")
-        log.info("Step 2 done: %s", result)
+    max_step2_attempts = 10
+    for attempt in range(1, max_step2_attempts + 1):
+        result = lol.relaunch_league_client(config)
+        if not result.get("ok"):
+            print(f"  {R}✗{RST} Machine 2: relaunch failed — {result.get('error')}")
+            log.error("Step 2 relaunch failed (attempt %d): %s", attempt, result)
+            time.sleep(5)
+            continue
+
+        print(f"  {C}▸{RST} Machine 2: League Client launched (attempt {attempt}), checking login session...")
+        time.sleep(5)
+
+        creds = lol.get_lcu_credentials(config)
+        if not creds:
+            print(f"  {Y}▸{RST} No LCU credentials yet, retrying...")
+            time.sleep(3)
+            continue
+
+        session = lol.get_login_session(creds)
+        if lol.is_logged_in_elsewhere(session):
+            print(f"  {G}✓{RST} Machine 2: LOGGED_IN_ELSEWHERE confirmed — ready for Step 3")
+            log.info("Step 2 done: LOGGED_IN_ELSEWHERE detected on attempt %d", attempt)
+            break
+        else:
+            state = (session or {}).get("state", "unknown")
+            error_id = ((session or {}).get("error") or {}).get("messageId", "none")
+            print(f"  {Y}▸{RST} Got state={state}, error={error_id} (not LOGGED_IN_ELSEWHERE)")
+            print(f"  {Y}▸{RST} Killing League Client and retrying...")
+            log.info("Step 2 attempt %d: state=%s error=%s, retrying", attempt, state, error_id)
+            lol.kill_all_league()
+            time.sleep(3)
     else:
-        print(f"  {R}✗{RST} Machine 2: relaunch failed — {result.get('error')}")
-        log.error("Step 2 failed: %s", result)
+        print(f"  {R}✗{RST} Machine 2: failed to get LOGGED_IN_ELSEWHERE after {max_step2_attempts} attempts")
+        log.error("Step 2 exhausted all attempts")
         return False
 
     time.sleep(2)

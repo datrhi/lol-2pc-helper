@@ -1,5 +1,5 @@
 {
-  "peer_host": "192.168.1.XXX",
+  "peer_host": "192.168.1.185",
   "peer_port": 5555,
   "server_port": 5555,
   "secret": "change-me-to-something-random",
