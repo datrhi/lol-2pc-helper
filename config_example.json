@@ -1,0 +1,9 @@
+{
+    "peer_host": "192.168.1.XXX",
+    "peer_port": 5555,
+    "server_port": 5555,
+    "secret": "change-me-to-something-random",
+    "poll_interval": 5,
+    "lockfile_path": null
+  }
+  

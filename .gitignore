@@ -1,0 +1,5 @@
+# Windows cache folder
+/__pycache__
+
+# config file
+config.json
