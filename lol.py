@@ -109,23 +109,17 @@ def is_ingame_running() -> bool:
     return len(_find_processes(_INGAME_NAMES.get(SYSTEM, []))) > 0
 
 
-def get_status(config: dict | None = None) -> dict:
+def get_status() -> dict:
     """Return a snapshot of League-related process state."""
     client_procs = _find_processes(_LEAGUE_CLIENT_NAMES.get(SYSTEM, []))
     ingame_procs = _find_processes(_INGAME_NAMES.get(SYSTEM, []))
     riot_procs = _find_processes(_RIOT_CLIENT_NAMES.get(SYSTEM, []))
 
     phase = None
-    login_state = None
-    logged_in_elsewhere = False
     try:
-        creds = get_lcu_credentials(config)
+        creds = get_lcu_credentials()
         if creds:
             phase = lcu_get("/lol-gameflow/v1/gameflow-phase", creds)
-            session = get_login_session(creds)
-            if session:
-                login_state = session.get("state")
-                logged_in_elsewhere = is_logged_in_elsewhere(session)
     except Exception:
         pass
 
@@ -136,8 +130,6 @@ def get_status(config: dict | None = None) -> dict:
         "ingame_pids": [p.pid for p in ingame_procs],
         "riot_client_running": len(riot_procs) > 0,
         "gameflow_phase": phase,
-        "login_state": login_state,
-        "logged_in_elsewhere": logged_in_elsewhere,
         "platform": SYSTEM,
     }
 
@@ -182,55 +174,6 @@ def kill_all_league() -> dict:
         "helpers": helper_results,
         "crash_handlers": crash_results,
     }
-
-
-# ── Login Session Detection ──────────────────────────────────────
-
-
-def get_login_session(creds: dict) -> dict | None:
-    """Query /lol-login/v1/session and return the JSON dict, or None."""
-    try:
-        result = lcu_get("/lol-login/v1/session", creds)
-        if isinstance(result, dict) and "errorCode" not in result:
-            return result
-    except Exception:
-        pass
-    return None
-
-
-def is_logged_in_elsewhere(session: dict | None = None, creds: dict | None = None) -> bool:
-    """
-    Detect the "Account logged elsewhere" popup.
-    Checks for: state == "LOGGING_OUT" and error.messageId == "LOGGED_IN_ELSEWHERE".
-    """
-    if session is None and creds is not None:
-        session = get_login_session(creds)
-    if not session:
-        return False
-    error = session.get("error") or {}
-    return (
-        session.get("state") == "LOGGING_OUT"
-        and error.get("messageId") == "LOGGED_IN_ELSEWHERE"
-    )
-
-
-def check_needs_restart(config: dict | None = None) -> dict:
-    """
-    Check if League Client needs a restart cycle.
-    Returns {"needs_restart": bool, "reason": str|None, ...}
-    """
-    if not is_league_client_running():
-        return {"needs_restart": True, "reason": "process_down"}
-
-    creds = get_lcu_credentials(config)
-    if not creds:
-        return {"needs_restart": False, "reason": None}
-
-    session = get_login_session(creds)
-    if is_logged_in_elsewhere(session):
-        return {"needs_restart": True, "reason": "logged_in_elsewhere"}
-
-    return {"needs_restart": False, "reason": None}
 
 
 # ── LCU Credentials ─────────────────────────────────────────────
