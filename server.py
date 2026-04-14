@@ -63,9 +63,9 @@ def api_kill():
 @app.route("/api/launch", methods=["POST"])
 @require_auth
 def api_launch():
-    """Launch League Client via Riot Client API."""
+    """Launch League Client via Riot Client API, with login error retry."""
     log.info("Launch requested from %s", request.remote_addr)
-    result = lol.launch_league_client(config)
+    result = lol.relaunch_league_client(config)
     log.info("Launch result: %s", result)
     if result.get("ok"):
         return jsonify(result)

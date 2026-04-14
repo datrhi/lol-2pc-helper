@@ -379,7 +379,6 @@ def relaunch_league_client(
 ) -> dict:
     """
     Kill In-Game process if present, then launch League Client.
-    Used by Machine 2 after its client goes down.
     If a login error is detected, kills the client and retries up to
     *max_login_retries* times.
     """
