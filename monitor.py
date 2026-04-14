@@ -111,7 +111,12 @@ def run_restart_workflow(config: dict) -> bool:
         print(f"  {G}✓{RST} Machine 2: League Client is ready (phase={result.get('phase')})")
         log.info("Step 2 done: %s", result)
     else:
-        print(f"  {R}✗{RST} Machine 2: relaunch failed — {result.get('error')}")
+        err = result.get("error", "")
+        if "login_error" in err:
+            print(f"  {R}✗{RST} Machine 2: login error detected — client killed & retried but still failed")
+            print(f"  {Y}  Detail: {result.get('detail', result.get('login_detail', ''))}{RST}")
+        else:
+            print(f"  {R}✗{RST} Machine 2: relaunch failed — {err}")
         log.error("Step 2 failed: %s", result)
         return False
 

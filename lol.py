@@ -257,6 +257,29 @@ def get_riot_client_credentials() -> dict | None:
 # ── LCU API ──────────────────────────────────────────────────────
 
 
+def check_login_session(creds: dict) -> dict:
+    """
+    Check login session state via LCU API.
+    Returns {"ok": True, "state": "SUCCEEDED"} on success,
+    or {"ok": False, "state": ..., "error": ...} on failure.
+    """
+    try:
+        session = lcu_get("/lol-login/v1/session", creds)
+        if isinstance(session, dict):
+            state = session.get("state", "")
+            error = session.get("error")
+            if state == "SUCCEEDED" and not error:
+                return {"ok": True, "state": state}
+            return {
+                "ok": False,
+                "state": state,
+                "error": error or f"login state: {state}",
+            }
+        return {"ok": False, "state": "UNKNOWN", "error": f"unexpected response: {session}"}
+    except Exception as exc:
+        return {"ok": False, "state": "EXCEPTION", "error": str(exc)}
+
+
 def lcu_get(endpoint: str, creds: dict) -> any:
     url = f"https://127.0.0.1:{creds['port']}{endpoint}"
     resp = requests.get(url, auth=("riot", creds["token"]), verify=False, timeout=10)
@@ -319,9 +342,29 @@ def launch_league_client(config: dict | None = None, max_wait: int = 90) -> dict
             try:
                 phase = lcu_get("/lol-gameflow/v1/gameflow-phase", creds)
                 if phase and "errorCode" not in str(phase):
-                    elapsed = round(time.time() - start, 1)
-                    log.info("League Client ready (phase=%s) after %.1fs", phase, elapsed)
-                    return {"ok": True, "phase": phase, "elapsed": elapsed}
+                    # Gameflow looks good — now verify login session
+                    login = check_login_session(creds)
+                    if login["ok"]:
+                        elapsed = round(time.time() - start, 1)
+                        log.info("League Client ready (phase=%s) after %.1fs", phase, elapsed)
+                        return {"ok": True, "phase": phase, "elapsed": elapsed}
+                    else:
+                        state = login.get("state", "")
+                        if state in ("ERROR", "LOGGING_OUT"):
+                            elapsed = round(time.time() - start, 1)
+                            log.warning(
+                                "Login error detected (state=%s) after %.1fs: %s",
+                                state, elapsed, login.get("error"),
+                            )
+                            return {
+                                "ok": False,
+                                "error": "login_error",
+                                "login_state": state,
+                                "login_detail": login.get("error"),
+                                "elapsed": elapsed,
+                            }
+                        # Still IN_PROGRESS or transitional — keep waiting
+                        log.debug("Login state: %s, still waiting...", state)
             except Exception:
                 pass
         time.sleep(2)
@@ -329,27 +372,51 @@ def launch_league_client(config: dict | None = None, max_wait: int = 90) -> dict
     return {"ok": False, "error": f"League Client not ready after {max_wait}s"}
 
 
-def relaunch_league_client(config: dict | None = None, max_wait: int = 90) -> dict:
+def relaunch_league_client(
+    config: dict | None = None,
+    max_wait: int = 90,
+    max_login_retries: int = 3,
+) -> dict:
     """
     Kill In-Game process if present, then launch League Client.
     Used by Machine 2 after its client goes down.
+    If a login error is detected, kills the client and retries up to
+    *max_login_retries* times.
     """
-    # Kill In-Game if it appeared
-    ingame_killed = kill_ingame()
-    if ingame_killed:
-        log.info("Killed In-Game processes before relaunch: %s", ingame_killed)
-        time.sleep(2)
+    for attempt in range(1, max_login_retries + 1):
+        # Kill In-Game if it appeared
+        ingame_killed = kill_ingame()
+        if ingame_killed:
+            log.info("Killed In-Game processes before relaunch: %s", ingame_killed)
+            time.sleep(2)
 
-    result = launch_league_client(config, max_wait)
+        result = launch_league_client(config, max_wait)
 
-    # Check again if In-Game appeared after launch and kill it
-    time.sleep(3)
-    if is_ingame_running():
-        log.info("In-Game process appeared after launch, killing it...")
-        kill_ingame()
-        time.sleep(2)
+        # Check again if In-Game appeared after launch and kill it
+        time.sleep(3)
+        if is_ingame_running():
+            log.info("In-Game process appeared after launch, killing it...")
+            kill_ingame()
+            time.sleep(2)
 
-    return result
+        if result.get("error") != "login_error":
+            return result
+
+        # Login error — kill everything and retry
+        log.warning(
+            "Login error on attempt %d/%d (state=%s). Killing client and retrying...",
+            attempt,
+            max_login_retries,
+            result.get("login_state"),
+        )
+        kill_all_league()
+        time.sleep(5)
+
+    return {
+        "ok": False,
+        "error": "login_error_after_retries",
+        "detail": f"Login error persisted after {max_login_retries} attempts",
+    }
 
 
 def load_config(path: str = "config.json") -> dict:
